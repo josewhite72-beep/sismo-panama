@@ -80,7 +80,7 @@ function normalizarUSGS(data) {
     lng: f.geometry.coordinates[0],
     depth: f.geometry.coordinates[2] ?? 0,
     mag: f.properties.mag ?? 0,
-    place: f.properties.place || 'Panamá',
+    lugarOriginal: f.properties.place || '',
     time: f.properties.time,
     fuente: 'USGS'
   }));
@@ -94,7 +94,7 @@ function normalizarEMSC(data) {
       lng: p.lon,
       depth: p.depth ?? 0,
       mag: p.mag ?? 0,
-      place: p.flynn_region || 'Panamá',
+      lugarOriginal: p.flynn_region || '',
       time: new Date(p.time).getTime(),
       fuente: 'EMSC'
     };
@@ -113,6 +113,128 @@ function unirSismos(usgs, emsc) {
     if (!repetido) resultado.push(e);
   });
   return resultado.sort((a, b) => b.time - a.time);
+}
+
+// ============================================
+// UBICACIÓN LEGIBLE: "12 km al SO de Tebario, Veraguas"
+// ============================================
+// Poblados de referencia [nombre, provincia/país, lat, lng].
+// Coordenadas aproximadas; se pueden agregar más poblados aquí.
+const POBLADOS = [
+  // Panamá y Panamá Oeste
+  ['Ciudad de Panamá', 'Panamá', 8.983, -79.517],
+  ['San Miguelito', 'Panamá', 9.033, -79.500],
+  ['Chepo', 'Panamá', 9.170, -79.100],
+  ['Isla Contadora', 'Panamá', 8.627, -79.035],
+  ['San Miguel (Isla del Rey)', 'Panamá', 8.455, -78.935],
+  ['La Chorrera', 'Panamá Oeste', 8.880, -79.783],
+  ['Arraiján', 'Panamá Oeste', 8.950, -79.650],
+  ['Chame', 'Panamá Oeste', 8.583, -79.883],
+  // Colón y Guna Yala
+  ['Colón', 'Colón', 9.359, -79.901],
+  ['Portobelo', 'Colón', 9.551, -79.651],
+  ['Nombre de Dios', 'Colón', 9.583, -79.475],
+  ['El Porvenir', 'Guna Yala', 9.558, -78.950],
+  ['Puerto Obaldía', 'Guna Yala', 8.666, -77.420],
+  // Darién
+  ['La Palma', 'Darién', 8.400, -78.150],
+  ['Metetí', 'Darién', 8.500, -77.983],
+  ['Yaviza', 'Darién', 8.157, -77.692],
+  ['El Real de Santa María', 'Darién', 8.130, -77.720],
+  ['Garachiné', 'Darién', 8.067, -78.367],
+  ['Jaqué', 'Darién', 7.519, -78.166],
+  // Coclé
+  ['Penonomé', 'Coclé', 8.519, -80.357],
+  ['Aguadulce', 'Coclé', 8.241, -80.546],
+  ['Antón', 'Coclé', 8.398, -80.262],
+  // Herrera
+  ['Chitré', 'Herrera', 7.961, -80.430],
+  ['Parita', 'Herrera', 8.000, -80.517],
+  ['Pesé', 'Herrera', 7.906, -80.617],
+  ['Ocú', 'Herrera', 7.950, -80.783],
+  ['Las Minas', 'Herrera', 7.800, -80.700],
+  // Los Santos
+  ['La Villa de Los Santos', 'Los Santos', 7.933, -80.415],
+  ['Las Tablas', 'Los Santos', 7.766, -80.274],
+  ['Macaracas', 'Los Santos', 7.733, -80.550],
+  ['Pedasí', 'Los Santos', 7.530, -80.025],
+  ['Tonosí', 'Los Santos', 7.400, -80.450],
+  ['Cambutal', 'Los Santos', 7.270, -80.480],
+  // Veraguas
+  ['Santiago', 'Veraguas', 8.100, -80.983],
+  ['Atalaya', 'Veraguas', 8.044, -80.926],
+  ['Montijo', 'Veraguas', 7.990, -81.060],
+  ['Río de Jesús', 'Veraguas', 7.983, -81.167],
+  ['Soná', 'Veraguas', 8.008, -81.320],
+  ['Calobre', 'Veraguas', 8.318, -80.841],
+  ['Santa Fe', 'Veraguas', 8.509, -81.078],
+  ['Mariato', 'Veraguas', 7.660, -80.990],
+  ['Isla de Coiba', 'Veraguas', 7.450, -81.750],
+  // Chiriquí y Comarca Ngäbe-Buglé
+  ['David', 'Chiriquí', 8.427, -82.430],
+  ['Boquete', 'Chiriquí', 8.778, -82.441],
+  ['Volcán', 'Chiriquí', 8.770, -82.640],
+  ['Puerto Armuelles', 'Chiriquí', 8.283, -82.867],
+  ['Boca Chica', 'Chiriquí', 8.217, -82.217],
+  ['Tolé', 'Chiriquí', 8.240, -81.680],
+  ['San Félix', 'Chiriquí', 8.283, -81.870],
+  // Bocas del Toro
+  ['Bocas del Toro', 'Bocas del Toro', 9.340, -82.242],
+  ['Changuinola', 'Bocas del Toro', 9.430, -82.517],
+  ['Almirante', 'Bocas del Toro', 9.300, -82.400],
+  ['Chiriquí Grande', 'Bocas del Toro', 8.950, -82.120],
+  // Costa Rica (zona fronteriza)
+  ['San José', 'Costa Rica', 9.933, -84.083],
+  ['Quepos', 'Costa Rica', 9.430, -84.160],
+  ['Dominical', 'Costa Rica', 9.250, -83.860],
+  ['San Isidro de El General', 'Costa Rica', 9.373, -83.700],
+  ['Palmar Norte', 'Costa Rica', 8.958, -83.461],
+  ['Golfito', 'Costa Rica', 8.640, -83.183],
+  ['Puerto Jiménez', 'Costa Rica', 8.533, -83.300],
+  ['Ciudad Neily', 'Costa Rica', 8.650, -82.933],
+  ['San Vito', 'Costa Rica', 8.820, -82.970],
+  ['Limón', 'Costa Rica', 9.990, -83.030],
+  ['Sixaola', 'Costa Rica', 9.522, -82.620],
+  // Colombia (zona fronteriza)
+  ['Acandí', 'Colombia', 8.512, -77.278],
+  ['Juradó', 'Colombia', 7.105, -77.763],
+  ['Bahía Solano', 'Colombia', 6.223, -77.408],
+  ['Turbo', 'Colombia', 8.093, -76.728]
+];
+
+const RUMBOS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
+
+const rad = g => g * Math.PI / 180;
+
+function distanciaKm(lat1, lng1, lat2, lng2) {
+  const dLat = rad(lat2 - lat1);
+  const dLng = rad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Rumbo desde el poblado hacia el sismo
+function rumbo(lat1, lng1, lat2, lng2) {
+  const y = Math.sin(rad(lng2 - lng1)) * Math.cos(rad(lat2));
+  const x = Math.cos(rad(lat1)) * Math.sin(rad(lat2)) -
+            Math.sin(rad(lat1)) * Math.cos(rad(lat2)) * Math.cos(rad(lng2 - lng1));
+  const grados = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  return RUMBOS[Math.round(grados / 22.5) % 16];
+}
+
+function describirUbicacion(lat, lng) {
+  let cercano = null;
+  let minKm = Infinity;
+  POBLADOS.forEach(p => {
+    const d = distanciaKm(p[2], p[3], lat, lng);
+    if (d < minKm) { minKm = d; cercano = p; }
+  });
+  if (!cercano) return 'Panamá';
+  const [nombre, zona] = cercano;
+  if (minKm < 3) return `Cerca de ${nombre}, ${zona}`;
+  return `${Math.round(minKm)} km al ${rumbo(cercano[2], cercano[3], lat, lng)} de ${nombre}, ${zona}`;
 }
 
 function haceCuanto(time) {
@@ -164,10 +286,10 @@ async function cargarSismos() {
       })
       .bindPopup(`
         <strong>M ${s.mag.toFixed(1)}</strong><br>
-        ${escaparHTML(s.place)}<br>
+        ${escaparHTML(describirUbicacion(s.lat, s.lng))}<br>
         Profundidad: ${s.depth.toFixed(1)} km<br>
         ${new Date(s.time).toLocaleString('es-PA')} (${haceCuanto(s.time)})<br>
-        <small>Fuente: ${s.fuente}</small>
+        <small>Fuente: ${s.fuente}${s.lugarOriginal ? ' · ' + escaparHTML(s.lugarOriginal) : ''}</small>
       `)
       .addTo(capaSismos);
     });
@@ -204,7 +326,7 @@ function renderizarLista(sismos) {
       <li class="sismo-item">
         <span class="magnitud" style="background:${obtenerColor(s.mag)}">M ${s.mag.toFixed(1)}</span>
         <div class="info">
-          <strong>${escaparHTML(s.place)}</strong>
+          <strong>${escaparHTML(describirUbicacion(s.lat, s.lng))}</strong>
           <small>${haceCuanto(s.time)} · ${new Date(s.time).toLocaleString('es-PA')} · ${s.depth.toFixed(0)} km prof. · ${s.fuente}</small>
         </div>
       </li>
