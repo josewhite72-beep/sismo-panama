@@ -68,7 +68,8 @@ function urlEMSC() {
 }
 
 async function pedirJSON(url) {
-  const response = await fetch(url);
+  // no-store: nunca usar una respuesta vieja guardada por el navegador
+  const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
@@ -96,23 +97,43 @@ function normalizarEMSC(data) {
       mag: p.mag ?? 0,
       lugarOriginal: p.flynn_region || '',
       time: new Date(p.time).getTime(),
-      fuente: 'EMSC'
+      fuente: 'EMSC',
+      id: p.unid
     };
   });
 }
 
-// Une ambas listas sin repetir el mismo sismo (mismo minuto y a menos de ~50 km)
-function unirSismos(usgs, emsc) {
-  const resultado = [...usgs];
-  emsc.forEach(e => {
-    const repetido = usgs.some(u =>
-      Math.abs(u.time - e.time) < 90 * 1000 &&
-      Math.abs(u.lat - e.lat) < 0.5 &&
-      Math.abs(u.lng - e.lng) < 0.5
-    );
-    if (!repetido) resultado.push(e);
+// IGC-UP (vía nuestra función en Vercel): fuente oficial de Panamá
+const URL_REGIONALES = '/api/regionales';
+
+function normalizarRegionales(data) {
+  return (data.sismos || []).map(s => ({ ...s, lugarOriginal: '' }));
+}
+
+// Une las listas sin repetir el mismo sismo (±90 s y a menos de ~50 km).
+// Las listas van en orden de prioridad: si un sismo está en varias, gana la primera.
+function unirSismos(...listas) {
+  const resultado = [];
+  listas.forEach(lista => {
+    lista.forEach(e => {
+      const repetido = resultado.some(u =>
+        Math.abs(u.time - e.time) < 90 * 1000 &&
+        Math.abs(u.lat - e.lat) < 0.5 &&
+        Math.abs(u.lng - e.lng) < 0.5
+      );
+      if (!repetido) resultado.push(e);
+    });
   });
   return resultado.sort((a, b) => b.time - a.time);
+}
+
+// El IGC trae su propia descripción en español; para las demás se calcula
+function ubicacionDe(s) {
+  return s.lugar || describirUbicacion(s.lat, s.lng);
+}
+
+function etiquetaFuente(s) {
+  return s.estado ? `${s.fuente} (${s.estado.toLowerCase()})` : s.fuente;
 }
 
 // ============================================
@@ -254,23 +275,49 @@ function escaparHTML(texto) {
   })[c]);
 }
 
+// Sismos recibidos en vivo por EMSC que quizá aún no salen en la consulta normal
+const sismosEnVivo = new Map();
+let cargando = false;
+let ultimaCarga = 0;
+
 async function cargarSismos() {
+  if (cargando) return;            // evita dos cargas al mismo tiempo
+  cargando = true;
   const estado = document.getElementById('ultima-actualizacion');
+  const boton = document.getElementById('btn-actualizar');
+  boton?.classList.add('girando');
+  if (boton) boton.disabled = true;
   try {
     // Se piden las dos fuentes a la vez; si una falla, se usa la otra
-    const [rUSGS, rEMSC] = await Promise.allSettled([
+    const [rIGC, rUSGS, rEMSC] = await Promise.allSettled([
+      pedirJSON(URL_REGIONALES),
       pedirJSON(urlUSGS()),
       pedirJSON(urlEMSC())
     ]);
-    if (rUSGS.status === 'rejected' && rEMSC.status === 'rejected') {
+    // La función responde aunque el IGC falle; se revisa si trajo datos
+    const igcOk = rIGC.status === 'fulfilled' && rIGC.value.fuentes?.igc?.ok;
+    if (!igcOk && rUSGS.status === 'rejected' && rEMSC.status === 'rejected') {
       throw new Error('Ninguna fuente respondió');
     }
+    if (!igcOk) console.warn('IGC-UP falló:', rIGC.reason || rIGC.value?.fuentes?.igc);
     if (rUSGS.status === 'rejected') console.warn('USGS falló:', rUSGS.reason);
     if (rEMSC.status === 'rejected') console.warn('EMSC falló:', rEMSC.reason);
 
+    const listaEMSC = rEMSC.status === 'fulfilled' ? normalizarEMSC(rEMSC.value) : [];
+    const idsEMSC = new Set(listaEMSC.map(s => s.id));
+    sismosEnVivo.forEach((s, id) => {
+      if (idsEMSC.has(id)) sismosEnVivo.delete(id);   // ya llegó por la consulta normal
+      else listaEMSC.push(s);
+    });
+
+    const listaIGC = igcOk
+      ? normalizarRegionales(rIGC.value).filter(s => s.mag >= MAG_MINIMA)
+      : [];
+
     const sismos = unirSismos(
+      listaIGC,
       rUSGS.status === 'fulfilled' ? normalizarUSGS(rUSGS.value) : [],
-      rEMSC.status === 'fulfilled' ? normalizarEMSC(rEMSC.value) : []
+      listaEMSC
     );
 
     capaSismos.clearLayers();
@@ -286,10 +333,10 @@ async function cargarSismos() {
       })
       .bindPopup(`
         <strong>M ${s.mag.toFixed(1)}</strong><br>
-        ${escaparHTML(describirUbicacion(s.lat, s.lng))}<br>
+        ${escaparHTML(ubicacionDe(s))}<br>
         Profundidad: ${s.depth.toFixed(1)} km<br>
         ${new Date(s.time).toLocaleString('es-PA')} (${haceCuanto(s.time)})<br>
-        <small>Fuente: ${s.fuente}${s.lugarOriginal ? ' · ' + escaparHTML(s.lugarOriginal) : ''}</small>
+        <small>Fuente: ${escaparHTML(etiquetaFuente(s))}${s.lugarOriginal ? ' · ' + escaparHTML(s.lugarOriginal) : ''}</small>
       `)
       .addTo(capaSismos);
     });
@@ -297,14 +344,66 @@ async function cargarSismos() {
     renderizarLista(sismos.slice(0, 15));
 
     const fuentes = [
+      igcOk ? 'IGC-UP' : null,
       rUSGS.status === 'fulfilled' ? 'USGS' : null,
       rEMSC.status === 'fulfilled' ? 'EMSC' : null
     ].filter(Boolean).join(' + ');
-    estado.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-PA')} · ${fuentes}`;
+    ultimaCarga = Date.now();
+    const enVivo = wsConectado ? ' · 🟢 en vivo' : '';
+    estado.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-PA')} · ${fuentes}${enVivo}`;
   } catch (error) {
     console.error('Error cargando sismos:', error);
     estado.textContent = '⚠️ Sin conexión. Mostrando datos en caché si existen.';
+  } finally {
+    cargando = false;
+    boton?.classList.remove('girando');
+    if (boton) boton.disabled = false;
   }
+}
+
+// ============================================
+// AVISOS EN VIVO (WebSocket de EMSC)
+// ============================================
+// EMSC envía cada sismo nuevo apenas lo registra, sin esperar al siguiente refresco.
+let wsConectado = false;
+let ws = null;
+
+function conectarEnVivo() {
+  if (!('WebSocket' in window)) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+  try {
+    ws = new WebSocket('wss://www.seismicportal.eu/standing_order/websocket');
+  } catch (e) {
+    return;
+  }
+
+  ws.onopen = () => { wsConectado = true; };
+
+  ws.onmessage = (evento) => {
+    try {
+      const msg = JSON.parse(evento.data);
+      const p = msg.data && msg.data.properties;
+      if (!p) return;
+      const dentro = p.lat >= REGION.minlatitude && p.lat <= REGION.maxlatitude &&
+                     p.lon >= REGION.minlongitude && p.lon <= REGION.maxlongitude;
+      if (!dentro || (p.mag ?? 0) < MAG_MINIMA) return;
+
+      sismosEnVivo.set(p.unid, normalizarEMSC({ features: [msg.data] })[0]);
+      cargarSismos();
+    } catch (e) {
+      console.warn('Mensaje en vivo no válido', e);
+    }
+  };
+
+  ws.onclose = () => {
+    wsConectado = false;
+    ws = null;
+    // Reintentar en 30 s si la app está visible
+    setTimeout(() => { if (!document.hidden) conectarEnVivo(); }, 30000);
+  };
+
+  ws.onerror = () => ws && ws.close();
 }
 
 function obtenerColor(magnitud) {
@@ -326,8 +425,8 @@ function renderizarLista(sismos) {
       <li class="sismo-item">
         <span class="magnitud" style="background:${obtenerColor(s.mag)}">M ${s.mag.toFixed(1)}</span>
         <div class="info">
-          <strong>${escaparHTML(describirUbicacion(s.lat, s.lng))}</strong>
-          <small>${haceCuanto(s.time)} · ${new Date(s.time).toLocaleString('es-PA')} · ${s.depth.toFixed(0)} km prof. · ${s.fuente}</small>
+          <strong>${escaparHTML(ubicacionDe(s))}</strong>
+          <small>${haceCuanto(s.time)} · ${new Date(s.time).toLocaleString('es-PA')} · ${s.depth.toFixed(0)} km prof. · ${escaparHTML(etiquetaFuente(s))}</small>
         </div>
       </li>
     `).join('');
@@ -378,5 +477,23 @@ document.getElementById('btn-reportar').addEventListener('click', () => {
 // ============================================
 // INICIO
 // ============================================
+document.getElementById('btn-actualizar').addEventListener('click', cargarSismos);
+
 cargarSismos();
-setInterval(cargarSismos, 60000); // Refrescar cada 60 segundos
+conectarEnVivo();
+
+// Refrescar cada 30 s mientras la app está en pantalla
+setInterval(() => { if (!document.hidden) cargarSismos(); }, 30000);
+
+// Al volver a abrir la app (Android pausa los temporizadores en segundo plano)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (Date.now() - ultimaCarga > 10000) cargarSismos();
+  conectarEnVivo();
+});
+
+// Al recuperar la conexión a internet
+window.addEventListener('online', () => {
+  cargarSismos();
+  conectarEnVivo();
+});
