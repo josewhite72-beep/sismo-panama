@@ -1,5 +1,5 @@
 // Sube este número en cada deploy para que los usuarios reciban la versión nueva
-const CACHE_NAME = 'sismo-pa-v2';
+const CACHE_NAME = 'sismo-pa-v3';
 
 const URLsToCache = [
   '/',
@@ -50,8 +50,9 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(event.request.url);
 
-  // API de USGS y archivos propios: siempre lo más reciente, caché como respaldo
-  if (url.hostname === 'earthquake.usgs.gov' || url.origin === self.location.origin) {
+  // APIs (USGS, EMSC) y archivos propios: siempre lo más reciente, caché como respaldo
+  if (url.hostname === 'earthquake.usgs.gov' ||
+      url.hostname === 'www.seismicportal.eu' || url.origin === self.location.origin) {
     event.respondWith(networkFirst(event.request));
     return;
   }

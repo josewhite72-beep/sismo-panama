@@ -34,18 +34,95 @@ const REGION = {
 const DIAS_ATRAS = 7;
 const MAG_MINIMA = 2.5;
 
-function construirUrl() {
+function fechaInicio() {
   const inicio = new Date(Date.now() - DIAS_ATRAS * 24 * 60 * 60 * 1000);
   // Redondear a la hora para que la URL se repita y el SW pueda usar la caché offline
   inicio.setUTCMinutes(0, 0, 0);
+  return inicio.toISOString().slice(0, 19);
+}
+
+// USGS: buena información, pero fuera de EE. UU. suele publicar solo M4+ y con retraso
+function urlUSGS() {
   const params = new URLSearchParams({
     format: 'geojson',
     ...REGION,
     minmagnitude: MAG_MINIMA,
-    starttime: inicio.toISOString().slice(0, 19),
+    starttime: fechaInicio(),
     orderby: 'time'
   });
   return `https://earthquake.usgs.gov/fdsnws/event/1/query?${params}`;
+}
+
+// EMSC (Centro Sismológico Euro-Mediterráneo): recoge agencias regionales,
+// publica sismos más pequeños y mucho más rápido para Centroamérica
+function urlEMSC() {
+  const params = new URLSearchParams({
+    format: 'json',
+    ...REGION,
+    minmagnitude: MAG_MINIMA,
+    starttime: fechaInicio(),
+    orderby: 'time',
+    limit: 500
+  });
+  return `https://www.seismicportal.eu/fdsnws/event/1/query?${params}`;
+}
+
+async function pedirJSON(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+// Convierte cada fuente a un formato común
+function normalizarUSGS(data) {
+  return (data.features || []).map(f => ({
+    lat: f.geometry.coordinates[1],
+    lng: f.geometry.coordinates[0],
+    depth: f.geometry.coordinates[2] ?? 0,
+    mag: f.properties.mag ?? 0,
+    place: f.properties.place || 'Panamá',
+    time: f.properties.time,
+    fuente: 'USGS'
+  }));
+}
+
+function normalizarEMSC(data) {
+  return (data.features || []).map(f => {
+    const p = f.properties;
+    return {
+      lat: p.lat,
+      lng: p.lon,
+      depth: p.depth ?? 0,
+      mag: p.mag ?? 0,
+      place: p.flynn_region || 'Panamá',
+      time: new Date(p.time).getTime(),
+      fuente: 'EMSC'
+    };
+  });
+}
+
+// Une ambas listas sin repetir el mismo sismo (mismo minuto y a menos de ~50 km)
+function unirSismos(usgs, emsc) {
+  const resultado = [...usgs];
+  emsc.forEach(e => {
+    const repetido = usgs.some(u =>
+      Math.abs(u.time - e.time) < 90 * 1000 &&
+      Math.abs(u.lat - e.lat) < 0.5 &&
+      Math.abs(u.lng - e.lng) < 0.5
+    );
+    if (!repetido) resultado.push(e);
+  });
+  return resultado.sort((a, b) => b.time - a.time);
+}
+
+function haceCuanto(time) {
+  const min = Math.round((Date.now() - time) / 60000);
+  if (min < 1) return 'hace un momento';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h ${min % 60} min`;
+  const d = Math.floor(h / 24);
+  return `hace ${d} día${d > 1 ? 's' : ''}`;
 }
 
 // Evita que textos de la API se interpreten como HTML
@@ -58,37 +135,50 @@ function escaparHTML(texto) {
 async function cargarSismos() {
   const estado = document.getElementById('ultima-actualizacion');
   try {
-    const response = await fetch(construirUrl());
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    const sismos = data.features || [];
+    // Se piden las dos fuentes a la vez; si una falla, se usa la otra
+    const [rUSGS, rEMSC] = await Promise.allSettled([
+      pedirJSON(urlUSGS()),
+      pedirJSON(urlEMSC())
+    ]);
+    if (rUSGS.status === 'rejected' && rEMSC.status === 'rejected') {
+      throw new Error('Ninguna fuente respondió');
+    }
+    if (rUSGS.status === 'rejected') console.warn('USGS falló:', rUSGS.reason);
+    if (rEMSC.status === 'rejected') console.warn('EMSC falló:', rEMSC.reason);
+
+    const sismos = unirSismos(
+      rUSGS.status === 'fulfilled' ? normalizarUSGS(rUSGS.value) : [],
+      rEMSC.status === 'fulfilled' ? normalizarEMSC(rEMSC.value) : []
+    );
 
     capaSismos.clearLayers();
 
-    sismos.forEach(earthquake => {
-      const [lng, lat, depth] = earthquake.geometry.coordinates;
-      const { place, time } = earthquake.properties;
-      const mag = earthquake.properties.mag ?? 0;
-
-      L.circleMarker([lat, lng], {
-        radius: Math.max(mag, 1) * 4,
-        fillColor: obtenerColor(mag),
+    // Se dibujan del más viejo al más nuevo para que el más reciente quede encima
+    [...sismos].reverse().forEach(s => {
+      L.circleMarker([s.lat, s.lng], {
+        radius: Math.max(s.mag, 1) * 2.5,
+        fillColor: obtenerColor(s.mag),
         color: '#000',
         weight: 1,
         fillOpacity: 0.6
       })
       .bindPopup(`
-        <strong>M ${mag.toFixed(1)}</strong><br>
-        ${escaparHTML(place)}<br>
-        Profundidad: ${(depth ?? 0).toFixed(1)} km<br>
-        ${new Date(time).toLocaleString('es-PA')}
+        <strong>M ${s.mag.toFixed(1)}</strong><br>
+        ${escaparHTML(s.place)}<br>
+        Profundidad: ${s.depth.toFixed(1)} km<br>
+        ${new Date(s.time).toLocaleString('es-PA')} (${haceCuanto(s.time)})<br>
+        <small>Fuente: ${s.fuente}</small>
       `)
       .addTo(capaSismos);
     });
 
-    renderizarLista(sismos.slice(0, 10));
+    renderizarLista(sismos.slice(0, 15));
 
-    estado.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-PA')}`;
+    const fuentes = [
+      rUSGS.status === 'fulfilled' ? 'USGS' : null,
+      rEMSC.status === 'fulfilled' ? 'EMSC' : null
+    ].filter(Boolean).join(' + ');
+    estado.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-PA')} · ${fuentes}`;
   } catch (error) {
     console.error('Error cargando sismos:', error);
     estado.textContent = '⚠️ Sin conexión. Mostrando datos en caché si existen.';
@@ -110,20 +200,15 @@ function renderizarLista(sismos) {
     return;
   }
 
-  lista.innerHTML = sismos.map(eq => {
-    const { place, time } = eq.properties;
-    const mag = eq.properties.mag ?? 0;
-    const depth = eq.geometry.coordinates[2] ?? 0;
-    return `
+  lista.innerHTML = sismos.map(s => `
       <li class="sismo-item">
-        <span class="magnitud" style="background:${obtenerColor(mag)}">M ${mag.toFixed(1)}</span>
+        <span class="magnitud" style="background:${obtenerColor(s.mag)}">M ${s.mag.toFixed(1)}</span>
         <div class="info">
-          <strong>${escaparHTML(place)}</strong>
-          <small>${new Date(time).toLocaleString('es-PA')} · ${depth.toFixed(0)} km prof.</small>
+          <strong>${escaparHTML(s.place)}</strong>
+          <small>${haceCuanto(s.time)} · ${new Date(s.time).toLocaleString('es-PA')} · ${s.depth.toFixed(0)} km prof. · ${s.fuente}</small>
         </div>
       </li>
-    `;
-  }).join('');
+    `).join('');
 }
 
 // ============================================
