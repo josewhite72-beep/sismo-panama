@@ -3,18 +3,27 @@
 // Revisa las páginas de INETER e IGC-UP y muestra de dónde cargan sus datos.
 // Se puede borrar cuando ya tengamos la función definitiva.
 
-// Ahora solo INETER (el IGC-UP ya funciona). Se prueba con https y http.
+// INETER tiene la cadena de certificados incompleta: se completa como lo hace el navegador
+const { leerConCadenaCompleta } = require('./_https-completo');
+
 const PAGINAS = [
   'https://webserver2.ineter.gob.ni/sis/monitor.html',
-  'http://webserver2.ineter.gob.ni/sis/monitor.html',
-  'https://web-geofisica.ineter.gob.ni/sis/monitor.html',
-  'http://web-geofisica.ineter.gob.ni/sis/monitor.html',
-  'https://www.ineter.gob.ni/'
+  'https://web-geofisica.ineter.gob.ni/sis/monitor.html'
 ];
 
 const PATRON_DATOS = /["'`(]([^"'`()\s]+\.(?:json|geojson|xml|php|txt|csv|js)(?:\?[^"'`()\s]*)?)["'`)]/gi;
 
 async function leer(url) {
+  try {
+    const r = await leerConCadenaCompleta(url);
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, tipo: r.tipo, texto: r.texto, intermedio: r.intermedio };
+  } catch (e) {
+    const causa = e.code ? ` · ${e.code}` : '';
+    return { ok: false, status: 0, error: `${e.message}${causa}`, texto: '' };
+  }
+}
+
+async function leerNormal(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000);
   try {
@@ -53,6 +62,7 @@ module.exports = async (req, res) => {
       status: pag.status,
       tipo: pag.tipo,
       error: pag.error,
+      intermedio: pag.intermedio,
       tamano: pag.texto.length,
       referencias: buscarReferencias(pag.texto, url),
       scriptsInternos: [],

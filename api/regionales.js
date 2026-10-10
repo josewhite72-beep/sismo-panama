@@ -58,6 +58,17 @@ function aTimestamp(fecha, hora) {
   return Date.UTC(+a, +mes - 1, +d, hh, +h[2], +(h[3] || 0)) + OFFSET_PANAMA_MS;
 }
 
+// "Localizado en Panamá a 18km al norte de Tonosí" → "18 km al norte de Tonosí"
+// "Localizado en Costa Rica a 24km al oeste de Río Sereno" → "24 km al oeste de Río Sereno (Costa Rica)"
+function limpiarLugar(texto) {
+  const t = String(texto || '').replace(/^Localizado en\s*/i, '').trim();
+  const m = t.match(/^(.*?)\s*\ba\s+(\d+(?:[.,]\d+)?)\s*km\s+(.+)$/i);
+  if (!m) return t;
+  const region = m[1].trim();
+  const base = `${m[2]} km ${m[3].trim()}`;
+  return region && region !== 'Panamá' ? `${base} (${region})` : base;
+}
+
 function extraerSismos(html) {
   const sismos = [];
   const vistos = new Set();
@@ -77,7 +88,7 @@ function extraerSismos(html) {
       depth: num(prof),
       mag: num(mag),
       time: aTimestamp(fecha, hora),
-      lugar: region,
+      lugar: limpiarLugar(region),
       estado: est.toUpperCase().startsWith('REV') ? 'Revisado' : 'Preliminar',
       fuente: 'IGC-UP'
     };
