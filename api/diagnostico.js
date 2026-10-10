@@ -3,10 +3,13 @@
 // Revisa las páginas de INETER e IGC-UP y muestra de dónde cargan sus datos.
 // Se puede borrar cuando ya tengamos la función definitiva.
 
+// Ahora solo INETER (el IGC-UP ya funciona). Se prueba con https y http.
 const PAGINAS = [
   'https://webserver2.ineter.gob.ni/sis/monitor.html',
+  'http://webserver2.ineter.gob.ni/sis/monitor.html',
   'https://web-geofisica.ineter.gob.ni/sis/monitor.html',
-  'https://sismosgeociencias.up.ac.pa/'
+  'http://web-geofisica.ineter.gob.ni/sis/monitor.html',
+  'https://www.ineter.gob.ni/'
 ];
 
 const PATRON_DATOS = /["'`(]([^"'`()\s]+\.(?:json|geojson|xml|php|txt|csv|js)(?:\?[^"'`()\s]*)?)["'`)]/gi;
@@ -22,7 +25,9 @@ async function leer(url) {
     const texto = await r.text();
     return { ok: r.ok, status: r.status, tipo: r.headers.get('content-type'), texto };
   } catch (e) {
-    return { ok: false, status: 0, error: String(e.message || e), texto: '' };
+    // La causa real (DNS, certificado, conexión rechazada, tiempo agotado...)
+    const causa = e.cause ? `${e.cause.code || ''} ${e.cause.message || ''}`.trim() : '';
+    return { ok: false, status: 0, error: `${e.name}: ${e.message}${causa ? ' · ' + causa : ''}`, texto: '' };
   } finally {
     clearTimeout(t);
   }
@@ -76,5 +81,9 @@ module.exports = async (req, res) => {
 
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
-  res.status(200).send(JSON.stringify({ generado: new Date().toISOString(), informe }, null, 2));
+  res.status(200).send(JSON.stringify({
+    generado: new Date().toISOString(),
+    region: process.env.VERCEL_REGION || 'desconocida',
+    informe
+  }, null, 2));
 };
