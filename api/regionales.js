@@ -1,9 +1,19 @@
-// Función Vercel: sismos del Instituto de Geociencias de la Universidad de Panamá (IGC-UP)
-// Lee https://sismosgeociencias.up.ac.pa/ (tabla HTML, últimos 7 días) y la devuelve como JSON.
+// Función Vercel: sismos de agencias regionales, devueltos como JSON
+//   - IGC-UP (Instituto de Geociencias, Universidad de Panamá): tabla HTML, últimos 7 días
+//   - INETER (Nicaragua): lista en sismos.php (hora de Nicaragua, UTC-6)
+// El orden de la lista es la prioridad: IGC-UP primero, luego INETER.
 //   /api/regionales          → lista de sismos
 //   /api/regionales?debug=1  → además muestra filas de ejemplo para revisar el formato
 
 const URL_IGC = 'https://sismosgeociencias.up.ac.pa/';
+const URL_INETER = 'https://webserver2.ineter.gob.ni/sis/events/sismos.php';
+const OFFSET_NICARAGUA_MS = 6 * 60 * 60 * 1000; // Nicaragua = UTC-6 todo el año
+
+// Zona de interés para INETER (su lista trae toda Centroamérica)
+const ZONA = { minLat: 5.5, maxLat: 11, minLng: -84.5, maxLng: -76 };
+
+// INETER tiene la cadena de certificados incompleta: se completa como lo hace el navegador
+const { leerConCadenaCompleta } = require('./_https-completo');
 const OFFSET_PANAMA_MS = 5 * 60 * 60 * 1000; // Panamá = UTC-5 todo el año
 
 async function leer(url) {
@@ -104,28 +114,63 @@ function extraerSismos(html) {
   return sismos.sort((a, b) => b.time - a.time);
 }
 
+// Línea de INETER (dentro de <PRE>):
+// 26/10/10 14:36:19  7.545 -80.411  10 4.4 <span>C</span>  16 Km al norte de Tonosí, Panamá
+const LINEA_INETER = /(\d{2})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+\S*\s*(.*)$/;
+
+function extraerIneter(html) {
+  const sismos = [];
+  const bloques = html.match(/<PRE>[\s\S]*?<\/PRE>/gi) || [];
+  for (const b of bloques) {
+    const linea = limpiar(b);
+    const m = linea.match(LINEA_INETER);
+    if (!m) continue;
+    const [, aa, mm, dd, hh, mi, ss, lat, lon, prof, mag, lugar] = m;
+    const s = {
+      lat: parseFloat(lat),
+      lng: parseFloat(lon),
+      depth: parseFloat(prof),
+      mag: parseFloat(mag),
+      time: Date.UTC(2000 + +aa, +mm - 1, +dd, +hh, +mi, +ss) + OFFSET_NICARAGUA_MS,
+      lugar: lugar.trim().replace(/(\d+)\s*Km\b/, '$1 km'),
+      fuente: 'INETER'
+    };
+    if (s.lat < ZONA.minLat || s.lat > ZONA.maxLat || s.lng < ZONA.minLng || s.lng > ZONA.maxLng) continue;
+    sismos.push(s);
+  }
+  return sismos.sort((a, b) => b.time - a.time);
+}
+
 module.exports = async (req, res) => {
   const debug = req.query && req.query.debug;
   const resultado = { generado: new Date().toISOString(), fuentes: {}, sismos: [] };
 
-  try {
-    const html = await leer(URL_IGC);
-    const sismos = extraerSismos(html);
+  // Las dos fuentes se piden a la vez; si una falla, la otra sigue
+  const [rIGC, rINETER] = await Promise.allSettled([
+    leer(URL_IGC),
+    leerConCadenaCompleta(URL_INETER, 12000, 'utf8')
+  ]);
+
+  if (rIGC.status === 'fulfilled') {
+    const sismos = extraerSismos(rIGC.value);
     resultado.sismos.push(...sismos);
-    resultado.fuentes.igc = { ok: true, cantidad: sismos.length };
-    if (debug) {
-      const filas = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
-      resultado.debug = {
-        filasEncontradas: filas.length,
-        ejemplos: filas.slice(0, 4).map(f => f.slice(0, 1200))
-      };
-    }
-  } catch (e) {
-    resultado.fuentes.igc = { ok: false, error: String(e.message || e) };
+    resultado.fuentes.igc = { ok: sismos.length > 0, cantidad: sismos.length };
+  } else {
+    resultado.fuentes.igc = { ok: false, error: String(rIGC.reason?.message || rIGC.reason) };
+  }
+
+  if (rINETER.status === 'fulfilled' && rINETER.value.status === 200) {
+    const sismos = extraerIneter(rINETER.value.texto);
+    resultado.sismos.push(...sismos);
+    resultado.fuentes.ineter = { ok: sismos.length > 0, cantidad: sismos.length };
+    if (debug) resultado.debugIneter = rINETER.value.texto.slice(0, 1500);
+  } else {
+    const motivo = rINETER.status === 'fulfilled' ? `HTTP ${rINETER.value.status}` : (rINETER.reason?.message || rINETER.reason);
+    resultado.fuentes.ineter = { ok: false, error: String(motivo) };
   }
 
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  // Vercel guarda la respuesta 20 s: la app recibe datos frescos sin saturar al IGC
+  // Vercel guarda la respuesta 20 s: la app recibe datos frescos sin saturar a las agencias
   res.setHeader('Cache-Control', 'public, s-maxage=20, stale-while-revalidate=40');
   res.status(200).send(JSON.stringify(resultado, null, debug ? 2 : 0));
 };
