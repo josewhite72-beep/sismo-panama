@@ -1,8 +1,18 @@
 // Acceso mínimo a Upstash Redis por su API REST (sin librerías).
 // Vercel crea las variables al conectar Upstash desde el panel (Storage / Marketplace).
 
-const URL_REDIS = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// Busca las claves con el prefijo estándar (KV_) o con cualquier prefijo personalizado
+// (por ejemplo STORAGE_REST_API_URL), por si se eligió otro al conectar Upstash.
+function buscarVariable(sufijos) {
+  for (const nombre of ['KV', 'UPSTASH_REDIS']) {
+    for (const suf of sufijos) if (process.env[`${nombre}_${suf}`]) return process.env[`${nombre}_${suf}`];
+  }
+  const clave = Object.keys(process.env).find(k => sufijos.some(suf => k.endsWith(`_${suf}`)) && !k.includes('READ_ONLY'));
+  return clave ? process.env[clave] : undefined;
+}
+
+const URL_REDIS = buscarVariable(['REST_API_URL', 'REST_URL']);
+const TOKEN = buscarVariable(['REST_API_TOKEN', 'REST_TOKEN']);
 
 function configurado() {
   return Boolean(URL_REDIS && TOKEN);
