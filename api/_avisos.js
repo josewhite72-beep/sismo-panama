@@ -15,13 +15,20 @@ const CLAVES = {
 const idDe = (endpoint) => crypto.createHash('sha256').update(String(endpoint)).digest('hex').slice(0, 32);
 
 // Llaves VAPID: se generan la primera vez y quedan guardadas en Redis
+const llavesValidas = (v) => Boolean(v && v.publicKey && v.privateKey);
+
 async function obtenerVapid() {
-  let v = await getJSON(CLAVES.vapid);
-  if (v && v.publicKey && v.privateKey) return v;
+  const v = await getJSON(CLAVES.vapid);
+  if (llavesValidas(v)) return v;
   const nuevas = webpush.generateVAPIDKeys();
   // NX: si otra llamada las creó al mismo tiempo, se conserva la primera
-  await redis('SET', CLAVES.vapid, JSON.stringify(nuevas), 'NX');
-  return getJSON(CLAVES.vapid);
+  const r = await redis('SET', CLAVES.vapid, JSON.stringify(nuevas), 'NX');
+  if (r === 'OK') return nuevas;
+  const otra = await getJSON(CLAVES.vapid);
+  if (llavesValidas(otra)) return otra;
+  // Había algo inválido guardado: se reemplaza
+  await redis('SET', CLAVES.vapid, JSON.stringify(nuevas));
+  return nuevas;
 }
 
 async function enviar(sub, datos, origen) {
