@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1e40af">
+  <title>Sismo Panamá</title>
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🌎 Sismo Panamá</h1>
+    <p id="ultima-actualizacion">Cargando...</p>
+  </header>
+
+  <main>
+    <div id="mapa"></div>
+    
+    <section id="lista-sismos">
+      <h2>Últimos sismos</h2>
+      <ul id="sismos-lista"></ul>
+    </section>
+
+    <section id="reporte">
+      <h2>¿Sentiste el sismo?</h2>
+      <button id="btn-reportar">Reportar intensidad</button>
+    </section>
+  </main>
+
+  <footer>
+    <p>Datos: USGS | Emergencias: <a href="tel:911">911</a> / <a href="tel:103">SINAPROC 103</a></p>
+  </footer>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
