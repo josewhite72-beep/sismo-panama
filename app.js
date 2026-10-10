@@ -103,7 +103,7 @@ function normalizarEMSC(data) {
   });
 }
 
-// IGC-UP (vía nuestra función en Vercel): fuente oficial de Panamá
+// IGC-UP (Panamá) e INETER (Nicaragua) vía nuestra función en Vercel
 const URL_REGIONALES = '/api/regionales';
 
 function normalizarRegionales(data) {
@@ -294,12 +294,16 @@ async function cargarSismos() {
       pedirJSON(urlUSGS()),
       pedirJSON(urlEMSC())
     ]);
-    // La función responde aunque el IGC falle; se revisa si trajo datos
-    const igcOk = rIGC.status === 'fulfilled' && rIGC.value.fuentes?.igc?.ok;
-    if (!igcOk && rUSGS.status === 'rejected' && rEMSC.status === 'rejected') {
+    // La función responde aunque una agencia falle; se revisa cuál trajo datos
+    const fuentesReg = rIGC.status === 'fulfilled' ? (rIGC.value.fuentes || {}) : {};
+    const igcOk = !!fuentesReg.igc?.ok;
+    const ineterOk = !!fuentesReg.ineter?.ok;
+    const regionalOk = igcOk || ineterOk;
+    if (!regionalOk && rUSGS.status === 'rejected' && rEMSC.status === 'rejected') {
       throw new Error('Ninguna fuente respondió');
     }
-    if (!igcOk) console.warn('IGC-UP falló:', rIGC.reason || rIGC.value?.fuentes?.igc);
+    if (!igcOk) console.warn('IGC-UP falló:', rIGC.reason || fuentesReg.igc);
+    if (!ineterOk) console.warn('INETER falló:', rIGC.reason || fuentesReg.ineter);
     if (rUSGS.status === 'rejected') console.warn('USGS falló:', rUSGS.reason);
     if (rEMSC.status === 'rejected') console.warn('EMSC falló:', rEMSC.reason);
 
@@ -310,7 +314,8 @@ async function cargarSismos() {
       else listaEMSC.push(s);
     });
 
-    const listaIGC = igcOk
+    // Viene en orden de prioridad: IGC-UP primero, luego INETER
+    const listaIGC = regionalOk
       ? normalizarRegionales(rIGC.value).filter(s => s.mag >= MAG_MINIMA)
       : [];
 
@@ -345,6 +350,7 @@ async function cargarSismos() {
 
     const fuentes = [
       igcOk ? 'IGC-UP' : null,
+      ineterOk ? 'INETER' : null,
       rUSGS.status === 'fulfilled' ? 'USGS' : null,
       rEMSC.status === 'fulfilled' ? 'EMSC' : null
     ].filter(Boolean).join(' + ');
