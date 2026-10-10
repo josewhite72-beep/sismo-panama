@@ -1,5 +1,5 @@
 // Sube este número en cada deploy para que los usuarios reciban la versión nueva
-const CACHE_NAME = 'sismo-pa-v8';
+const CACHE_NAME = 'sismo-pa-v9';
 
 // Archivos propios: obligatorios
 const URLsToCache = [
@@ -9,7 +9,8 @@ const URLsToCache = [
   '/app.js',
   '/manifest.json',
   '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  '/icons/icon-512.png',
+  '/icons/badge-96.png'
 ];
 
 // Externos: opcionales (si unpkg falla, el service worker se instala igual
@@ -84,7 +85,7 @@ self.addEventListener('push', event => {
     self.registration.showNotification(datos.title || 'Sismo Panamá', {
       body: datos.body || 'Nuevo sismo cerca de ti',
       icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      badge: '/icons/badge-96.png',   // icono pequeño de la barra: blanco sobre transparente
       tag: datos.tag || 'sismo',
       renotify: true,
       vibrate: [300, 100, 300, 100, 300],
