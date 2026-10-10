@@ -1,0 +1,8 @@
+{
+  "name": "sismo-panama",
+  "private": true,
+  "description": "PWA Sismo Panamá — PanaMentorLabs",
+  "dependencies": {
+    "web-push": "3.6.7"
+  }
+}

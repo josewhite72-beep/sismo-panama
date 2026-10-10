@@ -10,15 +10,27 @@ if ('serviceWorker' in navigator) {
 // ============================================
 // CONFIGURACIÓN DEL MAPA (Leaflet)
 // ============================================
-const mapa = L.map('mapa').setView([8.5379, -80.7821], 6); // Centro en Panamá
+// Si Leaflet no cargó (sin internet la primera vez, o unpkg caído),
+// la app sigue funcionando sin mapa: lista, actualización y avisos.
+const hayMapa = typeof L !== 'undefined';
+let mapa = null;
+let capaSismos = { clearLayers() {} };
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap',
-  maxZoom: 18
-}).addTo(mapa);
-
-// Capa propia para los sismos (más fácil de limpiar en cada refresco)
-const capaSismos = L.layerGroup().addTo(mapa);
+if (hayMapa) {
+  mapa = L.map('mapa').setView([8.5379, -80.7821], 6); // Centro en Panamá
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 18
+  }).addTo(mapa);
+  // Capa propia para los sismos (más fácil de limpiar en cada refresco)
+  capaSismos = L.layerGroup().addTo(mapa);
+} else {
+  const div = document.getElementById('mapa');
+  if (div) {
+    div.style.height = 'auto';
+    div.innerHTML = '<p style="padding:1rem;text-align:center">🗺️ El mapa no pudo cargar (sin conexión). La lista sigue actualizándose.</p>';
+  }
+}
 
 // ============================================
 // CONSUMIR API DE USGS (solo región de Panamá)
@@ -328,7 +340,7 @@ async function cargarSismos() {
     capaSismos.clearLayers();
 
     // Se dibujan del más viejo al más nuevo para que el más reciente quede encima
-    [...sismos].reverse().forEach(s => {
+    if (hayMapa) [...sismos].reverse().forEach(s => {
       L.circleMarker([s.lat, s.lng], {
         radius: Math.max(s.mag, 1) * 2.5,
         fillColor: obtenerColor(s.mag),
@@ -481,6 +493,248 @@ document.getElementById('btn-reportar').addEventListener('click', () => {
 });
 
 // ============================================
+// AVISOS DE SISMOS CERCANOS (notificaciones push)
+// ============================================
+const Avisos = (() => {
+  const CLAVE = 'avisos-config';
+  const $ = (id) => document.getElementById(id);
+  const soportado = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+  function leerConfig() {
+    try { return JSON.parse(localStorage.getItem(CLAVE)) || {}; } catch (e) { return {}; }
+  }
+  function guardarConfig(c) {
+    try { localStorage.setItem(CLAVE, JSON.stringify(c)); } catch (e) {}
+  }
+
+  function mostrar(texto, error = false) {
+    const p = $('avisos-estado');
+    if (!p) return;
+    p.textContent = texto;
+    p.classList.toggle('error', error);
+  }
+
+  function pintar(activo) {
+    const b = $('btn-avisos');
+    if (!b) return;
+    b.textContent = activo ? 'Desactivar avisos' : 'Activar avisos';
+    b.classList.toggle('activo', activo);
+    $('acciones-avisos').hidden = !activo;
+  }
+
+  // Llave pública VAPID (base64url) → bytes
+  function aBytes(base64) {
+    const relleno = '='.repeat((4 - base64.length % 4) % 4);
+    const b64 = (base64 + relleno).replace(/-/g, '+').replace(/_/g, '/');
+    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  }
+
+  const mismaLlave = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+  function ubicacion() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error('Tu navegador no permite obtener la ubicación'));
+      navigator.geolocation.getCurrentPosition(
+        p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        e => reject(new Error(e.code === 1 ? 'Permiso de ubicación denegado' : 'No se pudo obtener tu ubicación')),
+        { enableHighAccuracy: false, timeout: 20000, maximumAge: 10 * 60 * 1000 }
+      );
+    });
+  }
+
+  async function api(ruta, metodo = 'GET', cuerpo) {
+    const r = await fetch(ruta, {
+      method: metodo,
+      cache: 'no-store',
+      headers: cuerpo ? { 'Content-Type': 'application/json' } : undefined,
+      body: cuerpo ? JSON.stringify(cuerpo) : undefined
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.ok === false) throw new Error(data.error || `Error ${r.status}`);
+    return data;
+  }
+
+  const ajustes = () => ({
+    radio: Number($('aviso-radio').value),
+    magMin: Number($('aviso-mag').value)
+  });
+
+  // Espera al service worker, pero no para siempre (si no se instaló, avisa)
+  function swListo(ms = 10000) {
+    return Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(
+        'La app aún no terminó de instalarse. Recarga la página con internet y vuelve a intentar.')), ms))
+    ]);
+  }
+
+  async function suscripcionActual() {
+    const reg = await swListo();
+    return reg.pushManager.getSubscription();
+  }
+
+  async function registrar(sub, pos) {
+    await api('/api/suscribir', 'POST', { subscription: sub.toJSON(), lat: pos.lat, lng: pos.lng, ...ajustes() });
+    guardarConfig({ activo: true, ...ajustes(), lat: pos.lat, lng: pos.lng });
+  }
+
+  function textoActivo(extra = '') {
+    const { radio, magMin } = ajustes();
+    return `✅ Avisos activos: sismos de M ${magMin.toFixed(1)} o más a menos de ${radio} km de ti.${extra}`;
+  }
+
+  async function activar() {
+    const b = $('btn-avisos');
+    b.disabled = true;
+    try {
+      mostrar('Pidiendo permiso para notificaciones…');
+      const permiso = await Notification.requestPermission();
+      if (permiso !== 'granted') {
+        throw new Error('No diste permiso para notificaciones. Actívalo en los ajustes de Chrome para este sitio.');
+      }
+
+      mostrar('Obteniendo tu ubicación…');
+      const pos = await ubicacion();
+
+      mostrar('Conectando con el servidor de avisos…');
+      const { vapidPublicKey } = await api('/api/config');
+      const reg = await swListo();
+      const llave = aBytes(vapidPublicKey);
+      let sub = await reg.pushManager.getSubscription();
+      // Si había una suscripción hecha con otra llave, se renueva
+      const llaveVieja = sub?.options?.applicationServerKey;
+      if (sub && llaveVieja && !mismaLlave(new Uint8Array(llaveVieja), llave)) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+      sub = sub || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: llave });
+
+      await registrar(sub, pos);
+      pintar(true);
+      mostrar(textoActivo(' Toca "Enviar prueba" para comprobarlo.'));
+    } catch (e) {
+      console.error(e);
+      mostrar('⚠️ ' + e.message, true);
+    } finally {
+      b.disabled = false;
+    }
+  }
+
+  async function desactivar() {
+    const b = $('btn-avisos');
+    b.disabled = true;
+    try {
+      const sub = await suscripcionActual();
+      if (sub) {
+        await api('/api/suscribir', 'DELETE', { endpoint: sub.endpoint }).catch(() => {});
+        await sub.unsubscribe();
+      }
+      guardarConfig({ ...leerConfig(), activo: false });
+      pintar(false);
+      mostrar('Avisos desactivados.');
+    } catch (e) {
+      mostrar('⚠️ ' + e.message, true);
+    } finally {
+      b.disabled = false;
+    }
+  }
+
+  // Cambiar radio o magnitud con los avisos activos: se actualiza en el servidor
+  async function cambiarAjustes() {
+    const c = leerConfig();
+    guardarConfig({ ...c, ...ajustes() });
+    if (!c.activo) return;
+    try {
+      const sub = await suscripcionActual();
+      if (!sub) return;
+      await registrar(sub, { lat: c.lat, lng: c.lng });
+      mostrar(textoActivo());
+    } catch (e) {
+      mostrar('⚠️ No se pudieron guardar los cambios: ' + e.message, true);
+    }
+  }
+
+  async function actualizarUbicacion(silencioso = false) {
+    try {
+      const sub = await suscripcionActual();
+      if (!sub) return;
+      if (!silencioso) mostrar('Obteniendo tu ubicación…');
+      const pos = await ubicacion();
+      await registrar(sub, pos);
+      if (!silencioso) mostrar(textoActivo(' Ubicación actualizada.'));
+    } catch (e) {
+      if (!silencioso) mostrar('⚠️ ' + e.message, true);
+    }
+  }
+
+  async function enviarPrueba() {
+    try {
+      const sub = await suscripcionActual();
+      if (!sub) throw new Error('Los avisos no están activos en este teléfono');
+      mostrar('Enviando notificación de prueba…');
+      await api('/api/prueba', 'POST', { endpoint: sub.endpoint });
+      mostrar(textoActivo(' Prueba enviada: debería llegarte en unos segundos.'));
+    } catch (e) {
+      mostrar('⚠️ ' + e.message, true);
+    }
+  }
+
+  // Muestra si el revisor del servidor está funcionando
+  async function revisarServidor() {
+    try {
+      const { ultimaRevision } = await api('/api/config');
+      if (!ultimaRevision) return mostrar(textoActivo(' ⚠️ El revisor del servidor aún no ha corrido.'), true);
+      const min = Math.round((Date.now() - new Date(ultimaRevision.hora).getTime()) / 60000);
+      if (min > 5) mostrar(textoActivo(` ⚠️ El servidor no revisa desde hace ${min} min.`), true);
+      else mostrar(textoActivo(` Servidor revisando (última vez: hace ${min < 1 ? 'menos de 1' : min} min).`));
+    } catch (e) {
+      mostrar(textoActivo(' ⚠️ ' + e.message), true);
+    }
+  }
+
+  async function iniciar() {
+    if (!$('btn-avisos')) return;
+    if (!soportado) {
+      $('btn-avisos').disabled = true;
+      mostrar('Este navegador no permite notificaciones. Usa Chrome en Android con la app instalada.', true);
+      return;
+    }
+
+    const c = leerConfig();
+    if (c.radio) $('aviso-radio').value = String(c.radio);
+    if (c.magMin) $('aviso-mag').value = String(c.magMin);
+
+    $('btn-avisos').addEventListener('click', async () => {
+      const sub = await suscripcionActual().catch(() => null);
+      (sub && leerConfig().activo) ? desactivar() : activar();
+    });
+    // (si el service worker no está listo, activar() lo informa en pantalla)
+    $('aviso-radio').addEventListener('change', cambiarAjustes);
+    $('aviso-mag').addEventListener('change', cambiarAjustes);
+    $('btn-aviso-prueba').addEventListener('click', enviarPrueba);
+    $('btn-aviso-ubicacion').addEventListener('click', () => actualizarUbicacion(false));
+
+    // ¿Siguen activos? (el permiso pudo haberse quitado desde los ajustes del teléfono)
+    const sub = await suscripcionActual().catch(() => null);
+    const activo = Boolean(sub && c.activo && Notification.permission === 'granted');
+    pintar(activo);
+    if (!activo) {
+      if (c.activo) mostrar('Los avisos se desactivaron (se quitó el permiso). Vuelve a activarlos.', true);
+      return;
+    }
+    revisarServidor();
+
+    // Ubicación: se actualiza sola al abrir la app, solo si el permiso ya está concedido
+    try {
+      const permiso = await navigator.permissions?.query({ name: 'geolocation' });
+      if (permiso && permiso.state === 'granted') actualizarUbicacion(true);
+    } catch (e) {}
+  }
+
+  return { iniciar };
+})();
+
+// ============================================
 // INICIO
 // ============================================
 // ?. evita que la app se detenga si el botón no existe en el HTML
@@ -488,6 +742,7 @@ document.getElementById('btn-actualizar')?.addEventListener('click', cargarSismo
 
 cargarSismos();
 conectarEnVivo();
+Avisos.iniciar();
 
 // Refrescar cada 30 s mientras la app está en pantalla
 setInterval(() => { if (!document.hidden) cargarSismos(); }, 30000);
@@ -497,6 +752,11 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   if (Date.now() - ultimaCarga > 10000) cargarSismos();
   conectarEnVivo();
+});
+
+// Al tocar un aviso con la app abierta: actualizar de inmediato
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data && e.data.tipo === 'aviso-abierto') cargarSismos();
 });
 
 // Al recuperar la conexión a internet

@@ -34,6 +34,35 @@
       <ul id="sismos-lista"></ul>
     </section>
 
+    <section id="avisos">
+      <h2>🔔 Avisos de sismos cercanos</h2>
+      <p class="ayuda">Recibe una notificación cuando haya un sismo cerca de ti, aunque la app esté cerrada. Llega minutos después del sismo: no es una alerta temprana.</p>
+      <div class="ajustes-avisos">
+        <label>Radio
+          <select id="aviso-radio">
+            <option value="50">50 km</option>
+            <option value="100" selected>100 km</option>
+            <option value="200">200 km</option>
+            <option value="300">300 km</option>
+          </select>
+        </label>
+        <label>Magnitud mínima
+          <select id="aviso-mag">
+            <option value="3.5">M 3.5</option>
+            <option value="4" selected>M 4.0</option>
+            <option value="4.5">M 4.5</option>
+            <option value="5">M 5.0</option>
+          </select>
+        </label>
+      </div>
+      <button id="btn-avisos" type="button">Activar avisos</button>
+      <div id="acciones-avisos" class="acciones-avisos" hidden>
+        <button id="btn-aviso-prueba" type="button">Enviar prueba</button>
+        <button id="btn-aviso-ubicacion" type="button">Actualizar mi ubicación</button>
+      </div>
+      <p id="avisos-estado" class="avisos-estado"></p>
+    </section>
+
     <section id="reporte">
       <h2>¿Sentiste el sismo?</h2>
       <button id="btn-reportar">Reportar intensidad</button>

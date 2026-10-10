@@ -20,7 +20,7 @@ header p { font-size: 0.85rem; opacity: 0.9; }
 header {
   position: sticky;
   top: 0;
-  z-index: 1000; /* por encima de los controles de Leaflet */
+  z-index: 1100; /* por encima de los controles de Leaflet (usan 1000) */
 }
 
 .estado-fila {
@@ -101,6 +101,64 @@ header {
 
 #btn-reportar:active { transform: scale(0.98); }
 
+#avisos {
+  padding: 1rem;
+  background: white;
+  margin-top: 0.5rem;
+}
+
+#avisos .ayuda { font-size: 0.85rem; color: #6b7280; margin: 0.25rem 0 0.75rem; }
+
+.ajustes-avisos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.ajustes-avisos label { display: flex; flex-direction: column; font-size: 0.85rem; font-weight: bold; gap: 0.25rem; }
+
+.ajustes-avisos select {
+  padding: 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: white;
+  color: #1f2937;
+}
+
+#btn-avisos {
+  width: 100%;
+  padding: 1rem;
+  background: #1e40af;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+#btn-avisos.activo { background: #374151; }
+#btn-avisos:disabled { opacity: 0.6; }
+
+.acciones-avisos { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem; }
+.acciones-avisos[hidden] { display: none; }
+
+.acciones-avisos button {
+  padding: 0.7rem;
+  background: transparent;
+  color: #1e40af;
+  border: 1px solid #1e40af;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.avisos-estado { font-size: 0.85rem; margin-top: 0.6rem; color: #374151; }
+.avisos-estado.error { color: #dc2626; }
+
 footer {
   background: #1f2937;
   color: white;
@@ -114,7 +172,12 @@ footer a { color: #60a5fa; }
 /* Modo oscuro automático */
 @media (prefers-color-scheme: dark) {
   body { background: #111827; color: #f3f4f6; }
-  #lista-sismos, #reporte { background: #1f2937; }
+  #lista-sismos, #reporte, #avisos { background: #1f2937; }
+  #avisos .ayuda { color: #9ca3af; }
+  .ajustes-avisos select { background: #111827; color: #f3f4f6; border-color: #374151; }
+  .acciones-avisos button { color: #93c5fd; border-color: #93c5fd; }
+  .avisos-estado { color: #d1d5db; }
+  .avisos-estado.error { color: #f87171; }
   .sismo-item { border-color: #374151; }
   .info small { color: #9ca3af; }
 }
