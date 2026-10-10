@@ -483,7 +483,8 @@ document.getElementById('btn-reportar').addEventListener('click', () => {
 // ============================================
 // INICIO
 // ============================================
-document.getElementById('btn-actualizar').addEventListener('click', cargarSismos);
+// ?. evita que la app se detenga si el botón no existe en el HTML
+document.getElementById('btn-actualizar')?.addEventListener('click', cargarSismos);
 
 cargarSismos();
 conectarEnVivo();
