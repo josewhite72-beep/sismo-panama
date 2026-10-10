@@ -43,7 +43,7 @@ async function obtenerIntermedio(host, port) {
   return intermedios.get(host);
 }
 
-function pedir(url, ca, timeoutMs) {
+function pedir(url, ca, timeoutMs, codificacion = 'utf8') {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       ca,
@@ -53,14 +53,14 @@ function pedir(url, ca, timeoutMs) {
       // Seguir redirecciones dentro del mismo sitio
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        return resolve(pedir(new URL(res.headers.location, url).href, ca, timeoutMs));
+        return resolve(pedir(new URL(res.headers.location, url).href, ca, timeoutMs, codificacion));
       }
       const partes = [];
       res.on('data', d => partes.push(d));
       res.on('end', () => resolve({
         status: res.statusCode,
         tipo: res.headers['content-type'] || '',
-        texto: Buffer.concat(partes).toString('utf8')
+        texto: Buffer.concat(partes).toString(codificacion)
       }));
     });
     req.on('timeout', () => req.destroy(new Error('Tiempo agotado')));
@@ -69,10 +69,11 @@ function pedir(url, ca, timeoutMs) {
 }
 
 // Descarga una URL https verificando el certificado con la cadena completada
-async function leerConCadenaCompleta(url, timeoutMs = 12000) {
+// codificacion: 'latin1' para páginas en iso-8859-1 (como INETER), 'utf8' por defecto
+async function leerConCadenaCompleta(url, timeoutMs = 12000, codificacion = 'utf8') {
   const u = new URL(url);
   const inter = await obtenerIntermedio(u.hostname, Number(u.port) || 443);
-  const resultado = await pedir(url, [...tls.rootCertificates, inter.pem], timeoutMs);
+  const resultado = await pedir(url, [...tls.rootCertificates, inter.pem], timeoutMs, codificacion);
   return { ...resultado, intermedio: inter.origen };
 }
 
