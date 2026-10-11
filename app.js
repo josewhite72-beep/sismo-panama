@@ -293,15 +293,115 @@ let cargando = false;
 let ultimaCarga = 0;
 
 // ============================================
+// CAPAS GEOLÓGICAS: placas tectónicas y fallas activas
+// ============================================
+const Capas = (() => {
+  const CLAVE = 'capas-visibles';
+  const capas = {};
+  let preferencias = { placas: true, fallas: false };
+  try { preferencias = { ...preferencias, ...JSON.parse(localStorage.getItem(CLAVE) || '{}') }; } catch (e) {}
+
+  const guardar = () => { try { localStorage.setItem(CLAVE, JSON.stringify(preferencias)); } catch (e) {} };
+
+  // Etiquetas aproximadas de cada placa
+  const ETIQUETAS = [
+    ['Placa de Cocos', 6.9, -84.3],
+    ['Placa de Nazca', 5.7, -79.3],
+    ['Placa del Caribe', 11.6, -79.5],
+    ['Bloque de Panamá', 9.15, -80.3],
+    ['Bloque Andino', 6.5, -75.2]
+  ];
+
+  async function crearPlacas() {
+    const datos = await (await fetch('data/placas.json')).json();
+    const grupo = L.layerGroup();
+    L.geoJSON(datos, {
+      pane: 'geologia',
+      style: f => f.properties.tipo === 'subduccion'
+        ? { color: '#b91c1c', weight: 3, opacity: 0.85 }
+        : { color: '#c2410c', weight: 2.5, opacity: 0.8, dashArray: '8 6' },
+      onEachFeature: (f, capa) => {
+        const p = f.properties;
+        capa.bindPopup(`<strong>Límite de placas</strong><br>${escaparHTML(p.a)} – ${escaparHTML(p.b)}` +
+          (p.tipo === 'subduccion' ? '<br><small>Zona de subducción: una placa se hunde bajo la otra</small>' : ''));
+      }
+    }).addTo(grupo);
+    ETIQUETAS.forEach(([texto, lat, lng]) => L.marker([lat, lng], {
+      pane: 'geologia', interactive: false,
+      icon: L.divIcon({ className: 'etiqueta-placa', html: texto, iconSize: null })
+    }).addTo(grupo));
+    return grupo;
+  }
+
+  async function crearFallas() {
+    const datos = await (await fetch('data/fallas.json')).json();
+    return L.geoJSON(datos, {
+      pane: 'geologia',
+      style: { color: '#7c3aed', weight: 1.6, opacity: 0.8 },
+      onEachFeature: (f, capa) => {
+        const { n, m } = f.properties;
+        capa.bindPopup(`<strong>${escaparHTML(n || 'Falla activa')}</strong>` + (m ? `<br>Movimiento: ${escaparHTML(m)}` : ''));
+      }
+    });
+  }
+
+  async function mostrar(nombre, visible) {
+    if (!hayMapa) return;
+    try {
+      if (visible) {
+        capas[nombre] = capas[nombre] || await (nombre === 'placas' ? crearPlacas() : crearFallas());
+        capas[nombre].addTo(mapa);
+      } else if (capas[nombre]) {
+        mapa.removeLayer(capas[nombre]);
+      }
+    } catch (e) {
+      console.warn('No se pudo cargar la capa', nombre, e);
+    }
+  }
+
+  function pintarBotones() {
+    document.querySelectorAll('button[data-capa]').forEach(b => {
+      const activo = !!preferencias[b.dataset.capa];
+      b.classList.toggle('activo', activo);
+      b.setAttribute('aria-pressed', activo);
+    });
+  }
+
+  function iniciar() {
+    if (!hayMapa) return;
+    // Panel propio, debajo de los sismos
+    mapa.createPane('geologia');
+    mapa.getPane('geologia').style.zIndex = 350;
+    mapa.attributionControl.addAttribution('Placas: Bird · Fallas: GEM, CC BY-SA');
+
+    document.querySelectorAll('button[data-capa]').forEach(b => {
+      b.addEventListener('click', () => {
+        const nombre = b.dataset.capa;
+        preferencias[nombre] = !preferencias[nombre];
+        guardar();
+        pintarBotones();
+        mostrar(nombre, preferencias[nombre]);
+      });
+    });
+    pintarBotones();
+    Object.keys(preferencias).forEach(n => { if (preferencias[n]) mostrar(n, true); });
+  }
+
+  return { iniciar };
+})();
+
+// ============================================
 // VISTA: cuántos sismos mostrar en mapa y lista
 // ============================================
 let ultimosSismos = [];
 const CLAVE_CANTIDAD = 'cantidad-visible';
 
+const CANTIDADES = ['5', '10', '25', 'todos'];
+
 function cantidadElegida() {
   let v = null;
   try { v = localStorage.getItem(CLAVE_CANTIDAD); } catch (e) {}
-  return v || '10';
+  return CANTIDADES.includes(v) ? v : '10';
 }
 
 // encuadrar = true solo cuando el usuario cambia el selector (no en cada refresco)
@@ -344,13 +444,13 @@ function pintarSismos(encuadrar) {
 
   renderizarLista(visibles, ultimosSismos.length);
 
-  document.querySelectorAll('.selector-cantidad button').forEach(b => {
+  document.querySelectorAll('button[data-cantidad]').forEach(b => {
     b.classList.toggle('activo', b.dataset.cantidad === elegida);
     b.setAttribute('aria-pressed', b.dataset.cantidad === elegida);
   });
 }
 
-document.querySelectorAll('.selector-cantidad button').forEach(b => {
+document.querySelectorAll('button[data-cantidad]').forEach(b => {
   b.addEventListener('click', () => {
     try { localStorage.setItem(CLAVE_CANTIDAD, b.dataset.cantidad); } catch (e) {}
     pintarSismos(true);
@@ -789,6 +889,7 @@ const Avisos = (() => {
 // ?. evita que la app se detenga si el botón no existe en el HTML
 document.getElementById('btn-actualizar')?.addEventListener('click', cargarSismos);
 
+Capas.iniciar();
 cargarSismos();
 conectarEnVivo();
 Avisos.iniciar();

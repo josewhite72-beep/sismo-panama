@@ -1,5 +1,5 @@
 // Sube este número en cada deploy para que los usuarios reciban la versión nueva
-const CACHE_NAME = 'sismo-pa-v10';
+const CACHE_NAME = 'sismo-pa-v11';
 
 // Archivos propios: obligatorios
 const URLsToCache = [
@@ -10,7 +10,9 @@ const URLsToCache = [
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/badge-96.png'
+  '/icons/badge-96.png',
+  '/data/placas.json',
+  '/data/fallas.json'
 ];
 
 // Externos: opcionales (si unpkg falla, el service worker se instala igual

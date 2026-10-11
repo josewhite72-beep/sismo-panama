@@ -82,6 +82,21 @@ header {
 
 .resumen-lista { font-size: 0.8rem; color: #6b7280; margin-top: 0.15rem; }
 
+.selector-capas { padding-top: 0; }
+.selector-capas button { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
+.muestra { display: inline-block; width: 18px; height: 0; border-top: 3px solid; }
+.muestra-placas { border-color: #b91c1c; }
+.muestra-fallas { border-color: #7c3aed; }
+
+.etiqueta-placa {
+  font: bold 11px/1.2 system-ui, sans-serif;
+  color: #7f1d1d;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 /* Anillo pulsante en el sismo más reciente */
 .anillo-reciente { animation: pulso 1.6s ease-in-out infinite; }
 @keyframes pulso { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.25; } }
