@@ -443,6 +443,7 @@ function pintarSismos(encuadrar) {
   }
 
   renderizarLista(visibles, ultimosSismos.length);
+  Exportar.actualizarBotones();
 
   document.querySelectorAll('button[data-cantidad]').forEach(b => {
     b.classList.toggle('activo', b.dataset.cantidad === elegida);
@@ -600,6 +601,80 @@ function renderizarLista(sismos, total = sismos.length) {
 }
 
 // ============================================
+// EXPORTAR A CSV (se abre en Excel / Google Sheets)
+// ============================================
+const Exportar = (() => {
+  // Panamá está en UTC-5 todo el año (sin horario de verano)
+  const fechaPanama = t => new Date(t - 5 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  const fechaUTC = t => new Date(t).toISOString().slice(0, 19).replace('T', ' ');
+
+  // Comillas solo cuando hacen falta; las comillas internas se duplican
+  function celda(valor) {
+    const texto = String(valor ?? '');
+    return /[",\n\r]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+  }
+
+  function descargar(nombre, encabezados, filas) {
+    const csv = [encabezados, ...filas].map(f => f.map(celda).join(',')).join('\r\n');
+    // El BOM (﻿) hace que Excel muestre bien tildes y la ñ
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  const hoy = () => fechaPanama(Date.now()).slice(0, 10);
+
+  // Exporta todos los sismos cargados (no solo los visibles en el selector)
+  function sismos() {
+    if (!ultimosSismos.length) return;
+    descargar(`sismos-panama-${hoy()}.csv`,
+      ['Fecha y hora (Panamá)', 'Fecha y hora (UTC)', 'Magnitud', 'Profundidad (km)',
+       'Latitud', 'Longitud', 'Ubicación', 'Fuente', 'Lugar según la agencia'],
+      ultimosSismos.map(s => [
+        fechaPanama(s.time), fechaUTC(s.time),
+        s.mag.toFixed(1), s.depth.toFixed(1),
+        s.lat.toFixed(4), s.lng.toFixed(4),
+        ubicacionDe(s), etiquetaFuente(s), s.lugarOriginal
+      ]));
+  }
+
+  function leerReportes() {
+    try { return JSON.parse(localStorage.getItem('reportes') || '[]'); } catch (e) { return []; }
+  }
+
+  function reportes() {
+    const lista = leerReportes();
+    if (!lista.length) return;
+    descargar(`mis-reportes-sismo-${hoy()}.csv`,
+      ['Fecha y hora (Panamá)', 'Intensidad (1-5)', 'Latitud', 'Longitud', 'Ubicación aproximada'],
+      lista.map(r => [
+        fechaPanama(r.timestamp), r.intensidad,
+        r.lat.toFixed(4), r.lng.toFixed(4),
+        describirUbicacion(r.lat, r.lng)
+      ]));
+  }
+
+  // Activa o esconde los botones según haya datos
+  function actualizarBotones() {
+    const bS = document.getElementById('btn-exportar');
+    if (bS) bS.disabled = !ultimosSismos.length;
+    const bR = document.getElementById('btn-exportar-reportes');
+    if (bR) bR.hidden = !leerReportes().length;
+  }
+
+  document.getElementById('btn-exportar')?.addEventListener('click', sismos);
+  document.getElementById('btn-exportar-reportes')?.addEventListener('click', reportes);
+
+  return { actualizarBotones };
+})();
+
+// ============================================
 // REPORTE DE INTENSIDAD (guardado solo en este dispositivo)
 // ============================================
 document.getElementById('btn-reportar').addEventListener('click', () => {
@@ -631,6 +706,7 @@ document.getElementById('btn-reportar').addEventListener('click', () => {
       try { reportes = JSON.parse(localStorage.getItem('reportes') || '[]'); } catch (e) {}
       reportes.push(reporte);
       localStorage.setItem('reportes', JSON.stringify(reportes));
+      Exportar.actualizarBotones();
 
       alert('¡Gracias! Tu reporte quedó guardado en este dispositivo.');
     },
@@ -890,6 +966,7 @@ const Avisos = (() => {
 document.getElementById('btn-actualizar')?.addEventListener('click', cargarSismos);
 
 Capas.iniciar();
+Exportar.actualizarBotones();
 cargarSismos();
 conectarEnVivo();
 Avisos.iniciar();

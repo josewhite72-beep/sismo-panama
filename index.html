@@ -42,7 +42,10 @@
     <div id="mapa"></div>
     
     <section id="lista-sismos">
-      <h2>Últimos sismos</h2>
+      <div class="titulo-lista">
+        <h2>Últimos sismos</h2>
+        <button id="btn-exportar" class="btn-exportar" type="button" disabled>⬇ Exportar CSV</button>
+      </div>
       <p id="resumen-lista" class="resumen-lista"></p>
       <ul id="sismos-lista"></ul>
     </section>
@@ -79,6 +82,7 @@
     <section id="reporte">
       <h2>¿Sentiste el sismo?</h2>
       <button id="btn-reportar">Reportar intensidad</button>
+      <button id="btn-exportar-reportes" class="btn-exportar btn-exportar-ancho" type="button" hidden>⬇ Descargar mis reportes (CSV)</button>
     </section>
   </main>
 

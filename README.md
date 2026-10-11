@@ -9,6 +9,8 @@ PWA en Vanilla JS para ver los sismos recientes en Panamá y sus alrededores, co
 - Actualización automática cada 60 segundos.
 - Modo offline: muestra la última información guardada si no hay conexión.
 - Botón para registrar la intensidad sentida. **Por ahora el reporte se guarda solo en el dispositivo** (`localStorage`).
+- Botón **Exportar CSV**: descarga todos los sismos cargados (fecha en hora de Panamá y UTC, magnitud, profundidad, coordenadas, ubicación y fuente), listo para Excel.
+- Botón **Descargar mis reportes**: exporta en CSV los reportes de intensidad guardados en el dispositivo (aparece solo si hay reportes).
 - Accesos directos a emergencias: 911 y SINAPROC (103).
 
 ## Estructura
