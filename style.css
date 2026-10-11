@@ -54,6 +54,39 @@ header {
 
 @keyframes girar { to { transform: rotate(360deg); } }
 
+.selector-cantidad {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: white;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.selector-cantidad span { margin-right: 0.2rem; }
+
+.selector-cantidad button {
+  flex: 1;
+  padding: 0.45rem 0;
+  border: 1px solid #1e40af;
+  border-radius: 999px;
+  background: transparent;
+  color: #1e40af;
+  font-size: 0.9rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.selector-cantidad button.activo { background: #1e40af; color: white; }
+
+.resumen-lista { font-size: 0.8rem; color: #6b7280; margin-top: 0.15rem; }
+
+/* Anillo pulsante en el sismo más reciente */
+.anillo-reciente { animation: pulso 1.6s ease-in-out infinite; }
+@keyframes pulso { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .anillo-reciente { animation: none; } }
+
 #mapa {
   height: 50vh;
   width: 100%;
@@ -172,7 +205,10 @@ footer a { color: #60a5fa; }
 /* Modo oscuro automático */
 @media (prefers-color-scheme: dark) {
   body { background: #111827; color: #f3f4f6; }
-  #lista-sismos, #reporte, #avisos { background: #1f2937; }
+  #lista-sismos, #reporte, #avisos, .selector-cantidad { background: #1f2937; }
+  .selector-cantidad button { color: #93c5fd; border-color: #93c5fd; }
+  .selector-cantidad button.activo { background: #93c5fd; color: #111827; }
+  .resumen-lista { color: #9ca3af; }
   #avisos .ayuda { color: #9ca3af; }
   .ajustes-avisos select { background: #111827; color: #f3f4f6; border-color: #374151; }
   .acciones-avisos button { color: #93c5fd; border-color: #93c5fd; }

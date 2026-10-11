@@ -27,10 +27,18 @@
   </header>
 
   <main>
+    <div class="selector-cantidad" role="group" aria-label="Cuántos sismos mostrar">
+      <span>Mostrar:</span>
+      <button type="button" data-cantidad="5">5</button>
+      <button type="button" data-cantidad="10">10</button>
+      <button type="button" data-cantidad="25">25</button>
+      <button type="button" data-cantidad="todos">Todos</button>
+    </div>
     <div id="mapa"></div>
     
     <section id="lista-sismos">
       <h2>Últimos sismos</h2>
+      <p id="resumen-lista" class="resumen-lista"></p>
       <ul id="sismos-lista"></ul>
     </section>
 

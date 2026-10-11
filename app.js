@@ -292,6 +292,71 @@ const sismosEnVivo = new Map();
 let cargando = false;
 let ultimaCarga = 0;
 
+// ============================================
+// VISTA: cuántos sismos mostrar en mapa y lista
+// ============================================
+let ultimosSismos = [];
+const CLAVE_CANTIDAD = 'cantidad-visible';
+
+function cantidadElegida() {
+  let v = null;
+  try { v = localStorage.getItem(CLAVE_CANTIDAD); } catch (e) {}
+  return v || '10';
+}
+
+// encuadrar = true solo cuando el usuario cambia el selector (no en cada refresco)
+function pintarSismos(encuadrar) {
+  const elegida = cantidadElegida();
+  const visibles = elegida === 'todos' ? ultimosSismos : ultimosSismos.slice(0, Number(elegida));
+
+  capaSismos.clearLayers();
+  if (hayMapa) {
+    // Del más viejo al más nuevo para que el más reciente quede encima
+    [...visibles].reverse().forEach((s, i, arr) => {
+      const esUltimo = i === arr.length - 1;
+      const popup = `
+        <strong>M ${s.mag.toFixed(1)}</strong><br>
+        ${escaparHTML(ubicacionDe(s))}<br>
+        Profundidad: ${s.depth.toFixed(1)} km<br>
+        ${new Date(s.time).toLocaleString('es-PA')} (${haceCuanto(s.time)})<br>
+        <small>Fuente: ${escaparHTML(etiquetaFuente(s))}${s.lugarOriginal ? ' · ' + escaparHTML(s.lugarOriginal) : ''}</small>
+      `;
+      if (esUltimo) {
+        // Anillo que marca el sismo más reciente
+        L.circleMarker([s.lat, s.lng], {
+          radius: Math.max(s.mag, 1) * 2.5 + 7, color: '#dc2626', weight: 3, fill: false, className: 'anillo-reciente'
+        }).bindPopup(popup).addTo(capaSismos);
+      }
+      L.circleMarker([s.lat, s.lng], {
+        radius: Math.max(s.mag, 1) * 2.5,
+        fillColor: obtenerColor(s.mag),
+        color: '#000',
+        weight: 1,
+        fillOpacity: visibles.length > 25 ? 0.5 : 0.75
+      }).bindPopup(popup).addTo(capaSismos);
+    });
+
+    if (encuadrar && visibles.length) {
+      const limites = L.latLngBounds(visibles.map(s => [s.lat, s.lng]));
+      mapa.fitBounds(limites, { padding: [30, 30], maxZoom: 9 });
+    }
+  }
+
+  renderizarLista(visibles, ultimosSismos.length);
+
+  document.querySelectorAll('.selector-cantidad button').forEach(b => {
+    b.classList.toggle('activo', b.dataset.cantidad === elegida);
+    b.setAttribute('aria-pressed', b.dataset.cantidad === elegida);
+  });
+}
+
+document.querySelectorAll('.selector-cantidad button').forEach(b => {
+  b.addEventListener('click', () => {
+    try { localStorage.setItem(CLAVE_CANTIDAD, b.dataset.cantidad); } catch (e) {}
+    pintarSismos(true);
+  });
+});
+
 async function cargarSismos() {
   if (cargando) return;            // evita dos cargas al mismo tiempo
   cargando = true;
@@ -337,28 +402,8 @@ async function cargarSismos() {
       listaEMSC
     );
 
-    capaSismos.clearLayers();
-
-    // Se dibujan del más viejo al más nuevo para que el más reciente quede encima
-    if (hayMapa) [...sismos].reverse().forEach(s => {
-      L.circleMarker([s.lat, s.lng], {
-        radius: Math.max(s.mag, 1) * 2.5,
-        fillColor: obtenerColor(s.mag),
-        color: '#000',
-        weight: 1,
-        fillOpacity: 0.6
-      })
-      .bindPopup(`
-        <strong>M ${s.mag.toFixed(1)}</strong><br>
-        ${escaparHTML(ubicacionDe(s))}<br>
-        Profundidad: ${s.depth.toFixed(1)} km<br>
-        ${new Date(s.time).toLocaleString('es-PA')} (${haceCuanto(s.time)})<br>
-        <small>Fuente: ${escaparHTML(etiquetaFuente(s))}${s.lugarOriginal ? ' · ' + escaparHTML(s.lugarOriginal) : ''}</small>
-      `)
-      .addTo(capaSismos);
-    });
-
-    renderizarLista(sismos.slice(0, 15));
+    ultimosSismos = sismos;
+    pintarSismos(false);
 
     const fuentes = [
       igcOk ? 'IGC-UP' : null,
@@ -431,7 +476,11 @@ function obtenerColor(magnitud) {
   return '#65a30d';                      // Verde
 }
 
-function renderizarLista(sismos) {
+function renderizarLista(sismos, total = sismos.length) {
+  const resumen = document.getElementById('resumen-lista');
+  if (resumen) resumen.textContent = total
+    ? `Mostrando ${sismos.length} de ${total} sismos de los últimos ${DIAS_ATRAS} días`
+    : '';
   const lista = document.getElementById('sismos-lista');
 
   if (sismos.length === 0) {

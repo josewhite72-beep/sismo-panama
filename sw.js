@@ -1,5 +1,5 @@
 // Sube este número en cada deploy para que los usuarios reciban la versión nueva
-const CACHE_NAME = 'sismo-pa-v9';
+const CACHE_NAME = 'sismo-pa-v10';
 
 // Archivos propios: obligatorios
 const URLsToCache = [
