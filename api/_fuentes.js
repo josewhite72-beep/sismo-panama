@@ -78,39 +78,78 @@ function limpiarLugar(texto) {
   return region && region !== 'Panamá' ? `${base} (${region})` : base;
 }
 
-function extraerSismos(html) {
+// Convierte los textos de una fila del IGC en un sismo (o null si no es válida)
+function aSismoIGC([est, fecha, hora, lat, lon, prof, mag, region]) {
+  const s = {
+    lat: num(lat),
+    lng: num(lon),
+    depth: num(prof),
+    mag: num(mag),
+    time: aTimestamp(fecha, hora),
+    lugar: limpiarLugar(region),
+    estado: est.toUpperCase().startsWith('REV') ? 'Revisado' : 'Preliminar',
+    fuente: 'IGC-UP'
+  };
+  if ([s.lat, s.lng, s.mag, s.time].some(Number.isNaN)) return null;
+  if (Number.isNaN(s.depth)) s.depth = 0;
+  return s;
+}
+
+// Método 1: recorre la tabla. No exige </tr> ni </td>, porque el HTML permite omitirlos.
+function extraerDeTabla(html) {
   const sismos = [];
-  const vistos = new Set();
-  const filas = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
-
+  const filas = html.split(/<tr\b/i).slice(1);
   for (const fila of filas) {
-    const celdas = (fila.match(/<t[dh][\s\S]*?<\/t[dh]>/gi) || []).map(limpiar);
+    const celdas = fila.split(/<t[dh]\b/i).slice(1)
+      .map(c => limpiar(c.slice(c.indexOf('>') + 1).split(/<\/t[dh]>|<\/tr>|<\/table>/i)[0]));
     // Columnas esperadas: Estado | Fecha | Hora Local | Latitud | Longitud | Profundidad | Magnitud | Región | Mapa
-    if (celdas.length < 8) continue;
-    const estado = celdas.findIndex(c => /^(PRELIMINAR|REVISADO)/i.test(c));
-    if (estado === -1) continue;
-    const [est, fecha, hora, lat, lon, prof, mag, region] = celdas.slice(estado, estado + 8);
-
-    const s = {
-      lat: num(lat),
-      lng: num(lon),
-      depth: num(prof),
-      mag: num(mag),
-      time: aTimestamp(fecha, hora),
-      lugar: limpiarLugar(region),
-      estado: est.toUpperCase().startsWith('REV') ? 'Revisado' : 'Preliminar',
-      fuente: 'IGC-UP'
-    };
-    if ([s.lat, s.lng, s.mag, s.time].some(Number.isNaN)) continue;
-    if (Number.isNaN(s.depth)) s.depth = 0;
-
-    // La página repite cada sismo (vista de escritorio y de celular)
-    const clave = `${s.time}|${s.lat}|${s.lng}`;
-    if (vistos.has(clave)) continue;
-    vistos.add(clave);
-    sismos.push(s);
+    const i = celdas.findIndex(c => /^(PRELIMINAR|REVISADO)/i.test(c));
+    if (i === -1 || celdas.length - i < 8) continue;
+    const s = aSismoIGC(celdas.slice(i, i + 8));
+    if (s) sismos.push(s);
   }
+  return sismos;
+}
+
+// Método 2 (respaldo): lee el texto plano de la página, sin importar las etiquetas.
+// PRELIMINAR 2026-10-14 1:25:30PM 7.48477 -80.26070 7km 3.5 Localizado en Panamá a 21km al noreste de Tonosí Ver
+const FILA_TEXTO = /(PRELIMINAR|REVISADO)\s+(\d{4}-\d{1,2}-\d{1,2})\s+(\d{1,2}:\d{2}(?::\d{2})?\s*[AaPp]\.?\s*[Mm]\.?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*km\s+(\d+(?:\.\d+)?)\s+(Localizado.*?)(?=\s+Ver\b|\s+(?:PRELIMINAR|REVISADO)\s+\d{4}-|$)/gi;
+
+function extraerDeTexto(html) {
+  const texto = limpiar(html);
+  const sismos = [];
+  for (const m of texto.matchAll(FILA_TEXTO)) {
+    const s = aSismoIGC(m.slice(1, 9));
+    if (s) sismos.push(s);
+  }
+  return sismos;
+}
+
+function extraerSismos(html) {
+  let lista = extraerDeTabla(html);
+  if (lista.length === 0) lista = extraerDeTexto(html);
+
+  // Quita repetidos (antes la página repetía cada sismo para escritorio y celular)
+  const vistos = new Set();
+  const sismos = lista.filter(s => {
+    const clave = `${s.time}|${s.lat}|${s.lng}`;
+    if (vistos.has(clave)) return false;
+    vistos.add(clave);
+    return true;
+  });
   return sismos.sort((a, b) => b.time - a.time);
+}
+
+// Si no se reconoce ningún sismo, describe lo que llegó, para saber por qué
+function diagnosticoIGC(html) {
+  const titulo = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+  return {
+    bytes: html.length,
+    titulo: titulo ? limpiar(titulo).slice(0, 80) : null,
+    filasTr: (html.match(/<tr\b/gi) || []).length,
+    marcasEstado: (html.match(/PRELIMINAR|REVISADO/gi) || []).length,
+    inicio: limpiar(html).slice(0, 160)
+  };
 }
 
 // Línea de INETER (dentro de <PRE>):
@@ -152,6 +191,7 @@ async function obtenerRegionales() {
     const sismos = extraerSismos(rIGC.value);
     resultado.sismos.push(...sismos);
     resultado.fuentes.igc = { ok: sismos.length > 0, cantidad: sismos.length };
+    if (sismos.length === 0) resultado.fuentes.igc.diagnostico = diagnosticoIGC(rIGC.value);
   } else {
     resultado.fuentes.igc = { ok: false, error: String(rIGC.reason?.message || rIGC.reason) };
   }
